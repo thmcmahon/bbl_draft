@@ -1,0 +1,113 @@
+---
+title: "bbl_draft"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(lpSolve)
+library(knitr)
+```
+
+## Clean data
+
+```{r}
+# The web splits the data by batsmen, bowlers, wkp this creates duplicates
+bbl <- read_csv('data/clean_bbl.csv')
+bbl <- bbl[!duplicated(bbl[,1]),]
+bbl
+```
+
+
+## Exploratory analysis
+
+#### Cost vs Avg
+
+```{r}
+# Cost is a linear function of avg 2015-16 performance
+ggplot(data = bbl) +
+  geom_point(aes(Avg_15_16, Cost, colour = Position)) +
+  theme_bw()
+```
+
+#### Cost vs total
+
+```{r}
+ggplot(data = bbl) +
+  geom_point(aes(Total_15_16, Cost, colour = Position)) +
+  theme_bw()
+```
+
+## Linear programming
+
+Maximise:
+
+* Cost
+
+Constraints:
+
+* BAT == 7
+* BWL == 7
+* WKP == 2
+* Cost <= 1,000,000
+* Players == 16
+
+```{r}
+# instructions from http://pena.lt/y/2014/07/24/mathematically-optimising-fantasy-football-teams/
+
+# create position dummies
+bbl$bat <- as.numeric(grepl("BAT", bbl$Position))
+bbl$bwl <- as.numeric(grepl("BWL", bbl$Position))
+bbl$wkp <- as.numeric(grepl("WKP", bbl$Position))
+bbl$allrnd <- as.numeric(grepl("BAT - BWL", bbl$Position))
+bbl$plyr_count <- 1
+
+# create constraints
+nbat <- 7
+nbwl <- 7
+nwkp <- 2
+nallrnd <- 1
+max_cost <- 1e6
+nplayer <- 16 # must have a distinct number of players
+
+const_rhs <- c(nbat, nbwl, nwkp, max_cost, nplayer)
+
+# constraint directions
+const_dir <- c("=", "=", "=", "<=", "=")
+
+# Matrix has one row per constraint for each player
+const_mat <- bbl %>%
+  select(bat, bwl, wkp, Cost, plyr_count) %>%
+  as.matrix %>%
+  t
+```
+
+
+## Solve that g unit
+
+```{r}
+pick_team <- function(objective) {
+  x <- lp("max", objective.in = objective, const_mat, const_dir, const_rhs, all.bin = TRUE, all.int = TRUE)
+  bbl[as.logical(x$solution),]
+}
+```
+
+### Select team based on maximising cost
+
+```{r}
+pick_team(bbl$Cost) %>% arrange(Position, desc(Cost)) %>% kable
+```
+
+### Select team based on maximising avg points in 15-16
+
+```{r}
+pick_team(bbl$Avg_15_16) %>% arrange(Position, desc(Cost)) %>% kable
+```
+
+### Select team based on maximising total points in 15-16
+
+```{r}
+pick_team(bbl$Total_15_16) %>% arrange(Position, desc(Cost)) %>% kable
+```
